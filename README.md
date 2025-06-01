@@ -30,7 +30,6 @@ No downloads, no installs — just pure mining power.
 - 🌙 Dark/light mode switch
 - 🧠 QR code wallet generator
 - 📣 Web push alerts (optional)
-- 📋 Hidden admin panel (`Shift + D`)
 - 🕵️‍♂️ Real-time miner logs + diagnostics
 
 ---

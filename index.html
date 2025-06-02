@@ -5,48 +5,65 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>AdventureCoin WebMiner</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+
 </head>
 <body>
   <div id="app" class="container">
     <h1>⛏️ AdventureCoin WebMiner</h1>
 
     <div class="form-group">
-      <label>Wallet Address:</label>
-      <input type="text" id="wallet" placeholder="Enter your ADVC wallet"/>
+      <label for="wallet">Wallet Address:</label>
+      <input type="text" id="wallet" placeholder="Enter your ADVC wallet" />
     </div>
 
     <div class="form-group">
-      <label>Worker Name:</label>
-      <input type="text" id="worker" placeholder="e.g. rig1"/>
+      <label for="worker">Worker Name:</label>
+      <input type="text" id="worker" placeholder="e.g. rig1" />
     </div>
 
     <div class="form-group">
-      <label>Mining Pool:</label>
+      <label for="pool">Mining Pool:</label>
       <select id="pool">
-        <option value="stratum.novagrid.online:3130">NovaGrid</option>
-        <option value="eu.coin-miners.info:7650">Coin-Miners EU</option>
-        <option value="zergpool.com:6240">Zergpool</option>
+        <option value="stratum.novagrid.online:3130" data-url="wss://stratum.novagrid.online:3130">NovaGrid</option>
+        <option value="eu.coin-miners.info:7650" data-url="wss://eu.coin-miners.info:7650">Coin-Miners EU</option>
+        <option value="zergpool.com:6240" data-url="wss://zergpool.com:6240">Zergpool</option>
       </select>
     </div>
 
     <div class="form-group">
-      <label>Threads:</label>
-      <input type="number" id="threads" min="1" max="32" value="2"/>
+      <label for="threads">Threads:</label>
+      <input type="number" id="threads" min="1" max="32" value="2" />
+    </div>
+
+    <div class="form-group">
+      <label for="language">Language:</label>
+      <select id="language">
+        <option value="en">English</option>
+        <option value="es">Español</option>
+        <option value="fr">Français</option>
+        <!-- Add more languages as needed -->
+      </select>
     </div>
 
     <div class="actions">
-      <button id="startBtn">Start Mining</button>
-      <button id="stopBtn" disabled>Stop Mining</button>
+      <button id="startBtn">▶️ Start Mining</button>
+      <button id="stopBtn" disabled>⏹ Stop Mining</button>
       <button id="qrBtn">🔳 Show Wallet QR</button>
       <button id="themeToggle">🌓 Toggle Theme</button>
+      <button id="benchmarkBtn">⚙️ Benchmark</button>
     </div>
 
     <div id="stats" class="stats">
       <p>⏱ Time: <span id="elapsed">0s</span></p>
       <p>⚡ Hashrate: <span id="hashrate">0 H/s</span></p>
       <p>📤 Shares: ✅ <span id="accepted">0</span> ❌ <span id="rejected">0</span></p>
-      <p>💾 Donation Shares Sent: <span id="donationCount">0</span></p>
+      <p title="1 share per 100 goes to the dev wallet.">💾 Donation Shares Sent: <span id="donationCount">0</span></p>
+      <p>📶 Pool Latency: <span id="latency">0ms</span></p>
+      <p>🎯 Difficulty: <span id="difficulty">N/A</span></p>
     </div>
+
+    <canvas id="telemetryGraph" width="400" height="150"></canvas>
 
     <div id="shareLog" class="share-log"></div>
 
@@ -54,9 +71,11 @@
 
     <canvas id="qrCanvas" class="qr-code-container hidden"></canvas>
 
-    <p class="disclaimer">Note: A 1% dev donation fee is applied automatically (1 share per 100).</p>
+    <p class="disclaimer">
+      Note: A <strong>1% dev donation fee</strong> is applied automatically (1 share per 100).
+    </p>
   </div>
 
-  <script src="main.js"></script>
+  <script src="main.js" type="module"></script>
 </body>
 </html>

@@ -107,7 +107,7 @@ This is clearly disclosed in the UI and is **not hidden or obfuscated**.
 
 Built with ❤️ by CryptoDevelopmentServices  
 AdventureCoin (ADVC) — A CPU-friendly, community-first cryptocurrency.  
-https://github.com/AdventureCoinProject
+https://github.com/AdventureCoin-ADVC/AdventureCoin
 
 ---
 

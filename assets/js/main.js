@@ -5,20 +5,11 @@ let rejected = 0;
 let donationSent = 0;
 let interval, startTime;
 let hashrateHistory = [];
+let poolWS = null;
 
 const devAddress = "AYFxCGWTAx6wYHfd9CMnbH1WyxCHp7F2H8";
 let telemetryInterval;
 
-// QR Code helper
-// const QRCode = {
-//   toCanvas: function (canvas, text) {
-//     import("https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js").then((qr) =>
-//       qr.default.toCanvas(canvas, text, { width: 256 })
-//     );
-//   },
-// };
-
-// Only run after DOM is ready
 window.onload = () => {
   const ding = document.getElementById("ding");
   const telemetryCanvas = document.getElementById("telemetryGraph");
@@ -52,6 +43,7 @@ window.onload = () => {
       localStorage.setItem("minerPool", pool);
       localStorage.setItem("minerThreads", threads);
 
+      connectToPool(pool);
       startMining(wallet, worker, pool, threads);
     };
   }
@@ -96,28 +88,54 @@ window.onload = () => {
     };
   }
 
-  // Admin panel shortcut
   document.addEventListener("keydown", (e) => {
     if (e.shiftKey && e.key.toLowerCase() === "d") {
       alert(`Accepted: ${accepted}, Rejected: ${rejected}, Dev Shares: ${donationSent}`);
     }
   });
 
-  // Notification permission
   if ("Notification" in window && Notification.permission !== "granted") {
     Notification.requestPermission();
   }
 
-  // Multi-tab check
-  if (localStorage.getItem("tabActive")) {
-    alert("Another mining tab is already open. Mining disabled in this tab.");
-    if (startBtn) startBtn.disabled = true;
-  } else {
-    localStorage.setItem("tabActive", "true");
-    window.addEventListener("beforeunload", () => localStorage.removeItem("tabActive"));
+  // Pool dropdown listener (optional live switching)
+  if (poolInput) {
+    poolInput.onchange = (e) => {
+      const newPool = e.target.value;
+      if (mining) {
+        connectToPool(newPool);
+        logShare(`🔁 Switched to pool ${newPool}`);
+      }
+    };
   }
 
-  // --- Core functions below this point ---
+  // --- Core Functions ---
+
+  function connectToPool(poolAddress) {
+    if (poolWS && poolWS.readyState === WebSocket.OPEN) {
+      poolWS.close();
+    }
+
+    const url = `ws://localhost:3333/?pool=${encodeURIComponent(poolAddress)}`;
+    poolWS = new WebSocket(url);
+
+    poolWS.onopen = () => {
+      logShare(`🔌 Connected to pool: ${poolAddress}`);
+    };
+
+    poolWS.onerror = (e) => {
+      logShare(`⚠️ Connection error: ${e.message || e}`);
+    };
+
+    poolWS.onclose = () => {
+      logShare(`❌ Disconnected from pool`);
+    };
+
+    poolWS.onmessage = (event) => {
+      logShare(`📨 Pool message: ${event.data}`);
+      // Later: parse JSON, submit shares, etc.
+    };
+  }
 
   function startMining(wallet, worker, pool, threads) {
     mining = true;
@@ -141,6 +159,9 @@ window.onload = () => {
     clearInterval(telemetryInterval);
     if (startBtn) startBtn.disabled = false;
     if (stopBtn) stopBtn.disabled = true;
+    if (poolWS && poolWS.readyState === WebSocket.OPEN) {
+      poolWS.close();
+    }
   }
 
   function simulateShare(wallet) {

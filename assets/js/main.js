@@ -5,10 +5,13 @@ let rejected = 0;
 let donationSent = 0;
 let interval, startTime;
 let hashrateHistory = [];
-let poolWS = null;
+let currentPoolSocket = null;
+let telemetryInterval;
+let workers = [];
+let jobData = null;
+let jobId = "";
 
 const devAddress = "AYFxCGWTAx6wYHfd9CMnbH1WyxCHp7F2H8";
-let telemetryInterval;
 
 window.onload = () => {
   const ding = document.getElementById("ding");
@@ -43,12 +46,25 @@ window.onload = () => {
       localStorage.setItem("minerPool", pool);
       localStorage.setItem("minerThreads", threads);
 
-      connectToPool(pool);
-      startMining(wallet, worker, pool, threads);
+      connectToPool(pool, wallet, worker, threads);
     };
   }
 
   if (stopBtn) stopBtn.onclick = stopMining;
+
+  // <-- Add pool dropdown listener here -->
+  if (poolInput) {
+    poolInput.onchange = (e) => {
+      const newPool = e.target.value;
+      if (mining) {
+        const wallet = localStorage.getItem("minerWallet") || "";
+        const worker = localStorage.getItem("minerWorker") || "";
+        const threads = parseInt(localStorage.getItem("minerThreads"), 10) || 1;
+        connectToPool(newPool, wallet, worker, threads);
+        logShare(`🔁 Switched to pool ${newPool}`);
+      }
+    };
+  }
 
   const themeToggle = document.getElementById("themeToggle");
   if (themeToggle) {
@@ -98,97 +114,142 @@ window.onload = () => {
     Notification.requestPermission();
   }
 
-  // Pool dropdown listener (optional live switching)
-  if (poolInput) {
-    poolInput.onchange = (e) => {
-      const newPool = e.target.value;
-      if (mining) {
-        connectToPool(newPool);
-        logShare(`🔁 Switched to pool ${newPool}`);
+  function connectToPool(pool, wallet, worker, threads) {
+    if (currentPoolSocket) {
+      currentPoolSocket.close();
+      currentPoolSocket = null;
+    }
+
+    currentPoolSocket = new WebSocket(`ws://localhost:3333/?pool=${encodeURIComponent(pool)}`);
+
+    currentPoolSocket.onopen = () => {
+      console.log(`🟢 Connected to proxy for ${pool}`);
+      currentPoolSocket.send(JSON.stringify({ id: 1, method: "mining.subscribe", params: [] }));
+      currentPoolSocket.send(JSON.stringify({ id: 2, method: "mining.authorize", params: [`${wallet}.${worker}`, "x"] }));
+      startMining(wallet, worker, pool, threads);
+    };
+
+    currentPoolSocket.onclose = () => {
+      console.warn("🔌 Pool connection closed.");
+      stopMining();
+    };
+
+    currentPoolSocket.onerror = (err) => {
+      console.error("WebSocket Error:", err);
+      stopMining();
+    };
+
+    currentPoolSocket.onmessage = (msg) => {
+      const data = JSON.parse(msg.data);
+
+      if (data.method === "mining.set_difficulty") {
+        console.log("Difficulty set:", data.params[0]);
+      }
+
+      if (data.method === "mining.notify") {
+        jobId = data.params[0];
+        const blob = data.params[2];
+        const target = data.params[3];
+        jobData = { jobId, blob, target };
+        dispatchWork(blob, target);
+      }
+
+      // Handle pool share submission result
+      if (data.id === 4) { // assuming id 4 is mining.submit response
+        const isAccepted = data.result === true;
+        const wallet = localStorage.getItem("minerWallet");
+        const target = isAccepted ? wallet : "invalid";
+
+        if (isAccepted) {
+          accepted++;
+          try {
+            ding?.play();
+          } catch (e) {
+            console.warn("Ding sound failed:", e);
+          }
+          logShare(`✅ Share accepted for ${target}`);
+        } else {
+          rejected++;
+          logShare(`❌ Share rejected`);
+        }
+        updateStats();
       }
     };
   }
-
-  // --- Core Functions ---
-
-  function connectToPool(poolAddress) {
-    if (poolWS && poolWS.readyState === WebSocket.OPEN) {
-      poolWS.close();
-    }
-
-    const url = `ws://localhost:3333/?pool=${encodeURIComponent(poolAddress)}`;
-    poolWS = new WebSocket(url);
-
-    poolWS.onopen = () => {
-      logShare(`🔌 Connected to pool: ${poolAddress}`);
-    };
-
-    poolWS.onerror = (e) => {
-      logShare(`⚠️ Connection error: ${e.message || e}`);
-    };
-
-    poolWS.onclose = () => {
-      logShare(`❌ Disconnected from pool`);
-    };
-
-    poolWS.onmessage = (event) => {
-      logShare(`📨 Pool message: ${event.data}`);
-      // Later: parse JSON, submit shares, etc.
-    };
-  }
+};
 
   function startMining(wallet, worker, pool, threads) {
     mining = true;
     shareCount = accepted = rejected = donationSent = 0;
     hashrateHistory = [];
     startTime = Date.now();
-    if (startBtn) startBtn.disabled = true;
-    if (stopBtn) stopBtn.disabled = false;
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
     updateStats();
     startTelemetry();
 
-    interval = setInterval(() => {
-      simulateShare(wallet);
-      updateStats();
-    }, 1000 / threads);
+    workers = [];
+    for (let i = 0; i < threads; i++) {
+      const w = new Worker("assets/js/miner.worker.js");
+      w.onmessage = onWorkerMessage;
+      workers.push(w);
+    }
   }
 
   function stopMining() {
     mining = false;
     clearInterval(interval);
     clearInterval(telemetryInterval);
-    if (startBtn) startBtn.disabled = false;
-    if (stopBtn) stopBtn.disabled = true;
-    if (poolWS && poolWS.readyState === WebSocket.OPEN) {
-      poolWS.close();
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    if (currentPoolSocket) {
+      currentPoolSocket.close();
+      currentPoolSocket = null;
+    }
+    workers.forEach(w => w.terminate());
+    workers = [];
+  }
+
+  function dispatchWork(blob, target) {
+    for (const w of workers) {
+      w.postMessage({ type: "job", blob, target });
     }
   }
 
-  function simulateShare(wallet) {
-    if (!mining) return;
-
-    const isAccepted = Math.random() > 0.05;
+  function onWorkerMessage(e) {
+  const msg = e.data;
+  if (msg.type === "share") {
     shareCount++;
 
-    if (shareCount % 100 === 0) {
-      logShare(`🎁 Dev Donation Share sent to ${devAddress}`);
+    // Determine if this share is a dev fee share (1 in every 100 shares)
+    const isDevFeeShare = shareCount % 100 === 0;
+    const address = isDevFeeShare ? devAddress : localStorage.getItem("minerWallet");
+    const worker = isDevFeeShare ? "donation" : localStorage.getItem("minerWorker");
+
+    const submit = {
+      id: 4,
+      method: "mining.submit",
+      params: [
+        `${address}.${worker}`,
+        jobId,
+        msg.nonce,
+        msg.result
+      ]
+    };
+
+    if (isDevFeeShare) {
       donationSent++;
+      logShare("💚 Dev share submitted to support the project!");
+      notify("Dev Share Sent", "Thanks for supporting continued development!");
     } else {
-      const target = isAccepted ? wallet : "invalid";
-      if (isAccepted) {
-        accepted++;
-        try {
-          ding?.play();
-        } catch (e) {
-          console.warn("Ding sound failed:", e);
-        }
-        logShare(`✅ Share accepted for ${target}`);
-      } else {
-        rejected++;
-        logShare(`❌ Share rejected`);
-      }
+      
+      accepted++;
     }
+
+    currentPoolSocket?.send(JSON.stringify(submit));
+    updateStats();
   }
+}
 
   function updateStats() {
     const elapsed = Math.floor((Date.now() - startTime) / 1000);

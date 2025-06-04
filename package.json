@@ -1,5 +1,8 @@
 {
   "dependencies": {
-    "stratum-proxy": "^0.0.5"
+    "express": "^5.1.0",
+    "https": "^1.0.0",
+    "stratum-proxy": "^0.0.5",
+    "ws": "^8.18.2"
   }
 }

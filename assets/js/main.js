@@ -120,11 +120,12 @@ window.onload = () => {
       currentPoolSocket = null;
     }
 
-    currentPoolSocket = new WebSocket(`ws://localhost:3333/?pool=${encodeURIComponent(pool)}`);  // running locally
-    // currentPoolSocket = new WebSocket(`wss://localhost:3333/?pool=${encodeURIComponent(pool)}`);  // running on a VPS
+    const proxyURL = `ws://localhost:3333/?pool=${encodeURIComponent(pool)}`;
+    currentPoolSocket = new WebSocket(proxyURL);
 
     currentPoolSocket.onopen = () => {
       console.log(`🟢 Connected to proxy for ${pool}`);
+      appendToLog(`[✓] Connected to pool: ${pool}`);
       currentPoolSocket.send(JSON.stringify({ id: 1, method: "mining.subscribe", params: [] }));
       currentPoolSocket.send(JSON.stringify({ id: 2, method: "mining.authorize", params: [`${wallet}.${worker}`, "x"] }));
       startMining(wallet, worker, pool, threads);
@@ -138,12 +139,6 @@ window.onload = () => {
     currentPoolSocket.onerror = (err) => {
       console.error("WebSocket Error:", err);
       stopMining();
-    };
-
-    currentPoolSocket = new WebSocket(poolUrl);
-
-    currentPoolSocket.onopen = function() {
-      appendToLog(`[✓] Connected to pool: ${poolUrl}`);
     };
 
     currentPoolSocket.onmessage = (msg) => {
@@ -161,19 +156,14 @@ window.onload = () => {
         dispatchWork(blob, target);
       }
 
-      // Handle pool share submission result
-      if (data.id === 4) { // assuming id 4 is mining.submit response
+      if (data.id === 4) {
         const isAccepted = data.result === true;
         const wallet = localStorage.getItem("minerWallet");
         const target = isAccepted ? wallet : "invalid";
 
         if (isAccepted) {
           accepted++;
-          try {
-            ding?.play();
-          } catch (e) {
-            console.warn("Ding sound failed:", e);
-          }
+          try { ding?.play(); } catch (e) {}
           logShare(`✅ Share accepted for ${target}`);
         } else {
           rejected++;
@@ -234,13 +224,16 @@ function appendToLog(message) {
   }
 }
 
-// This is your existing onWorkerMessage handler with no changes
 function onWorkerMessage(e) {
   const msg = e.data;
+
+  if (msg.type === "log") {
+    logShare(msg.message); // <— Show logs from worker
+  }
+
   if (msg.type === "share") {
     shareCount++;
 
-    // Determine if this share is a dev fee share (1 in every 100 shares)
     const isDevFeeShare = shareCount % 100 === 0;
     const address = isDevFeeShare ? devAddress : localStorage.getItem("minerWallet");
     const worker = isDevFeeShare ? "donation" : localStorage.getItem("minerWorker");

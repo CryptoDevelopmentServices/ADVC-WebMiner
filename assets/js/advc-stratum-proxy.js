@@ -15,6 +15,7 @@ wss.on('connection', (ws, req) => {
 
     const stratum = net.connect(port, host, () => {
         console.log('Connected to mining pool');
+        ws.send(JSON.stringify({ type: 'log', message: `[✔] Connected to pool: ${host}:${port}` }));
     });
 
     // Forward Stratum data to browser

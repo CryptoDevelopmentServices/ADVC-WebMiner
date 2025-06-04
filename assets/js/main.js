@@ -140,6 +140,12 @@ window.onload = () => {
       stopMining();
     };
 
+    currentPoolSocket = new WebSocket(poolUrl);
+
+    currentPoolSocket.onopen = function() {
+      appendToLog(`[✓] Connected to pool: ${poolUrl}`);
+    };
+
     currentPoolSocket.onmessage = (msg) => {
       const data = JSON.parse(msg.data);
 
@@ -217,7 +223,19 @@ window.onload = () => {
     }
   }
 
-  function onWorkerMessage(e) {
+  // Helper function to append messages to the log area in the UI
+function appendToLog(message) {
+  const logElem = document.getElementById('log'); // Change 'log' to your actual log container ID
+  if (logElem) {
+    const entry = document.createElement('div');
+    entry.textContent = message;
+    logElem.appendChild(entry);
+    logElem.scrollTop = logElem.scrollHeight; // Auto scroll to bottom
+  }
+}
+
+// This is your existing onWorkerMessage handler with no changes
+function onWorkerMessage(e) {
   const msg = e.data;
   if (msg.type === "share") {
     shareCount++;
@@ -240,10 +258,9 @@ window.onload = () => {
 
     if (isDevFeeShare) {
       donationSent++;
-      logShare("💚 Dev share submitted to support the project!");
+      appendToLog("💚 Dev share submitted to support the project!");
       notify("Dev Share Sent", "Thanks for supporting continued development!");
     } else {
-      
       accepted++;
     }
 

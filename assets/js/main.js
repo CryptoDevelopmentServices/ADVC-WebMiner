@@ -120,7 +120,7 @@ window.onload = () => {
       currentPoolSocket = null;
     }
 
-    currentPoolSocket = new WebSocket(`ws://localhost:3333/?pool=${encodeURIComponent(pool)}`);
+    currentPoolSocket = new WebSocket(`ws://proxy.adventurecoin.quest:3333/?pool=${encodeURIComponent(pool)}`);
 
     currentPoolSocket.onopen = () => {
       console.log(`🟢 Connected to proxy for ${pool}`);

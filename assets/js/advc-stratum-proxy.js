@@ -1,38 +1,48 @@
-// advc-stratum-proxy.js
-const WebSocket = require('wss');
+const fs = require('fs');
+const https = require('https');
+const WebSocket = require('ws');
 const net = require('net');
 const url = require('url');
 
-const wss = new WebSocket.Server({ port: 3333 });
+// ✅ Replace with your actual SSL cert and key paths
+const server = https.createServer({
+  cert: fs.readFileSync('/etc/letsencrypt/live/proxy.adventurecoin.quest/fullchain.pem'),
+  key: fs.readFileSync('/etc/letsencrypt/live/proxy.adventurecoin.quest/privkey.pem')
+});
 
-wss.on('connection', (wss, req) => {
-    const { query } = url.parse(req.url, true);
-    const pool = (query.pool || '').split(':');
-    const host = pool[0];
-    const port = parseInt(pool[1] || '3333');
+const wss = new WebSocket.Server({ server });
 
-    console.log(`Incoming WSs client → connect to ${host}:${port}`);
+wss.on('connection', (ws, req) => {
+  const { query } = url.parse(req.url, true);
+  const pool = (query.pool || '').split(':');
+  const host = pool[0];
+  const port = parseInt(pool[1] || '3333');
 
-    const stratum = net.connect(port, host, () => {
-        console.log('Connected to mining pool');
-    });
+  console.log(`Incoming WS client → connect to ${host}:${port}`);
 
-    // Forward Stratum data to browser
-    stratum.on('data', (data) => {
-        wss.send(data.toString());
-    });
+  const stratum = net.connect(port, host, () => {
+    console.log('Connected to mining pool');
+  });
 
-    // Forward browser data to pool
-    wss.on('message', (msg) => {
-        stratum.write(msg + '\n');
-    });
+  stratum.on('data', (data) => {
+    ws.send(data.toString());
+  });
 
-    wss.on('close', () => {
-        stratum.end();
-    });
+  ws.on('message', (msg) => {
+    stratum.write(msg + '\n');
+  });
 
-    stratum.on('error', (err) => {
-        console.error('Stratum error:', err.message);
-        wss.close();
-    });
+  ws.on('close', () => {
+    stratum.end();
+  });
+
+  stratum.on('error', (err) => {
+    console.error('Stratum error:', err.message);
+    ws.close();
+  });
+});
+
+// 🔒 Start HTTPS server
+server.listen(3333, () => {
+  console.log('✅ Secure WSS proxy running on port 3333');
 });

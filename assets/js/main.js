@@ -10,8 +10,10 @@ let telemetryInterval;
 let workers = [];
 let jobData = null;
 let jobId = "";
-
 const devAddress = "AYFxCGWTAx6wYHfd9CMnbH1WyxCHp7F2H8";
+
+// Store hashrate per worker index
+const workerHashrates = [];
 
 window.onload = () => {
   const ding = document.getElementById("ding");
@@ -53,7 +55,6 @@ window.onload = () => {
 
   if (stopBtn) stopBtn.onclick = stopMining;
 
-  // Pool dropdown change listener to switch pools on the fly
   if (poolInput) {
     poolInput.onchange = (e) => {
       const newPool = e.target.value;
@@ -67,7 +68,6 @@ window.onload = () => {
     };
   }
 
-  // Theme toggle button for light/dark mode
   const themeToggle = document.getElementById("themeToggle");
   if (themeToggle) {
     themeToggle.onclick = () => {
@@ -78,7 +78,6 @@ window.onload = () => {
     };
   }
 
-  // QR code toggle and generation
   const qrBtn = document.getElementById("qrBtn");
   if (qrBtn) {
     qrBtn.onclick = () => {
@@ -91,7 +90,6 @@ window.onload = () => {
     };
   }
 
-  // Language selector stub
   if (languageSelect) {
     languageSelect.onchange = (e) => {
       const lang = e.target.value;
@@ -100,7 +98,6 @@ window.onload = () => {
     };
   }
 
-  // Benchmark button stub - random estimated hashrate
   const benchBtn = document.getElementById("benchmarkBtn");
   if (benchBtn) {
     benchBtn.onclick = () => {
@@ -109,19 +106,16 @@ window.onload = () => {
     };
   }
 
-  // Debug stats display on Shift+D keypress
   document.addEventListener("keydown", (e) => {
     if (e.shiftKey && e.key.toLowerCase() === "d") {
       alert(`Accepted: ${accepted}, Rejected: ${rejected}, Dev Shares: ${donationSent}`);
     }
   });
 
-  // Request notification permission if needed
   if ("Notification" in window && Notification.permission !== "granted") {
     Notification.requestPermission();
   }
 
-  // Connect to mining pool via proxy and start workers
   function connectToPool(pool, wallet, worker, threads) {
     if (currentPoolSocket) {
       currentPoolSocket.close();
@@ -150,35 +144,47 @@ window.onload = () => {
     };
 
     currentPoolSocket.onmessage = (msg) => {
-      const data = JSON.parse(msg.data);
+      // Split incoming messages by newlines (some pools send multiple JSON objects at once separated by \n)
+      const messages = msg.data.split(/\r?\n/);
 
-      if (data.method === "mining.set_difficulty") {
-        console.log("Difficulty set:", data.params[0]);
-        document.getElementById("difficulty").textContent = data.params[0];
-      }
+      for (const msgStr of messages) {
+        if (!msgStr.trim()) continue;
 
-      if (data.method === "mining.notify") {
-        jobId = data.params[0];
-        const blob = data.params[2];
-        const target = data.params[3];
-        jobData = { jobId, blob, target };
-        dispatchWork(blob, target);
-      }
+        try {
+          const data = JSON.parse(msgStr);
 
-      if (data.id === 4) {
-        const isAccepted = data.result === true;
-        const wallet = localStorage.getItem("minerWallet");
-        const target = isAccepted ? wallet : "invalid";
+          if (data.method === "mining.set_difficulty") {
+            console.log("Difficulty set:", data.params[0]);
+            document.getElementById("difficulty").textContent = data.params[0];
+          }
 
-        if (isAccepted) {
-          accepted++;
-          try { ding?.play(); } catch (e) {}
-          logShare(`✅ Share accepted for ${target}`);
-        } else {
-          rejected++;
-          logShare(`❌ Share rejected`);
+          if (data.method === "mining.notify") {
+            const jobId = data.params[0];
+            const blob = data.params[2];
+            const target = data.params[3];
+            jobData = { jobId, blob, target };
+            dispatchWork(blob, target);
+          }
+
+          if (data.id === 4) {
+            const isAccepted = data.result === true;
+            const wallet = localStorage.getItem("minerWallet");
+            const target = isAccepted ? wallet : "invalid";
+
+            if (isAccepted) {
+              accepted++;
+              try { ding?.play(); } catch (e) {}
+              logShare(`✅ Share accepted for ${target}`);
+            } else {
+              rejected++;
+              logShare(`❌ Share rejected`);
+            }
+            updateStats();
+          }
+        } catch (e) {
+          // Not JSON — maybe raw stratum text or junk, just ignore or log it
+          console.warn("Non-JSON message received:", msgStr);
         }
-        updateStats();
       }
     };
   }
@@ -188,6 +194,7 @@ window.onload = () => {
     mining = true;
     shareCount = accepted = rejected = donationSent = 0;
     hashrateHistory = [];
+    workerHashrates.length = 0; // reset hashrate tracking
     startTime = Date.now();
     startBtn.disabled = true;
     stopBtn.disabled = false;
@@ -202,14 +209,14 @@ window.onload = () => {
       w.onmessage = onWorkerMessage;
       workers.push(w);
 
-      // Initialize WASM
-      w.postMessage({ type: "init" });
-      // Connect the worker's WebSocket to the pool proxy
+      w.workerIndex = i; // assign worker index
+      w.postMessage({ type: "init", workerIndex: i });
       w.postMessage({ type: "connect", proxyURL });
+
+      workers.push(w);
     }
   }
 
-  // Stop mining and clean up workers
   function stopMining() {
     mining = false;
     clearInterval(interval);
@@ -217,31 +224,29 @@ window.onload = () => {
     startBtn.disabled = false;
     stopBtn.disabled = true;
     workers.forEach(w => {
-      w.postMessage({ type: "disconnect" }); // optionally add this to workers if you want to close sockets cleanly
+      w.postMessage({ type: "disconnect" }); // optional, if you implement clean disconnect in worker
       w.terminate();
     });
     workers = [];
   }
 
-  // Dispatch new mining job to workers
   function dispatchWork(blob, target) {
     for (const w of workers) {
       w.postMessage({ type: "job", blob, target });
     }
   }
 
-  // Append messages to the share log in UI
+  // Helper function to append messages to the log area in the UI
   function appendToLog(message) {
-    const logElem = document.getElementById('shareLog'); 
+    const logElem = document.getElementById('shareLog');
     if (logElem) {
       const entry = document.createElement('div');
       entry.textContent = message;
       logElem.appendChild(entry);
-      logElem.scrollTop = logElem.scrollHeight; // auto-scroll
+      logElem.scrollTop = logElem.scrollHeight;
     }
   }
 
-  // Handle messages from workers
   function onWorkerMessage(e) {
     const msg = e.data;
 
@@ -249,10 +254,9 @@ window.onload = () => {
       logShare(msg.message);
     }
 
-    if (msg.type === "share") {
+    else if (msg.type === "share") {
       shareCount++;
 
-      // Every 100th share is a dev fee share
       const isDevFeeShare = shareCount % 100 === 0;
       const address = isDevFeeShare ? devAddress : localStorage.getItem("minerWallet");
       const worker = isDevFeeShare ? "donation" : localStorage.getItem("minerWorker");
@@ -279,9 +283,17 @@ window.onload = () => {
       currentPoolSocket?.send(JSON.stringify(submit));
       updateStats();
     }
+
+    else if (msg.type === "hashrate" && typeof msg.value === "number") {
+      const workerIndex = msg.workerIndex;
+
+      if (typeof workerIndex === "number") {
+        workerHashrates[workerIndex] = msg.value;
+        updateStats();
+      }
+    }
   }
 
-  // Update mining stats UI
   function updateStats() {
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
     document.getElementById("elapsed").textContent = `${elapsed}s`;
@@ -289,22 +301,20 @@ window.onload = () => {
     document.getElementById("rejected").textContent = rejected;
     document.getElementById("donationCount").textContent = donationSent;
 
-    // TODO: calculate real hashrate based on shares & time
-    const hashrate = Math.floor(Math.random() * 20 + 50);
-    document.getElementById("hashrate").textContent = `${hashrate} H/s`;
+    // Sum up all worker hashrates for total
+    const hashrate = workerHashrates.reduce((a, b) => a + b || 0, 0);
+    document.getElementById("hashrate").textContent = `${hashrate.toFixed(2)} H/s`;
 
     hashrateHistory.push(hashrate);
     if (hashrateHistory.length > 100) hashrateHistory.shift();
   }
 
-  // Show a notification if permission granted
-  function notify(title, body) {
-    if (Notification.permission === "granted") {
-      new Notification(title, { body });
-    }
+  function logShare(msg) {
+    const log = document.getElementById("shareLog");
+    const now = new Date().toLocaleTimeString();
+    log.innerHTML = `[${now}] ${msg}<br>` + log.innerHTML;
   }
 
-  // Start telemetry graph updates
   function startTelemetry() {
     if (!telemetryCtx || !telemetryCanvas) return;
     telemetryInterval = setInterval(() => {
@@ -321,4 +331,10 @@ window.onload = () => {
       telemetryCtx.stroke();
     }, 1000);
   }
+
+  function notify(title, body) {
+    if (Notification.permission === "granted") {
+      new Notification(title, { body });
+    }
+  };
 };

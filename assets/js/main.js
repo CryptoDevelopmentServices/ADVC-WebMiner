@@ -21,8 +21,8 @@ window.onload = () => {
   const telemetryCtx = telemetryCanvas?.getContext("2d");
 
   const walletInput = document.getElementById("wallet");
-  const workerInput = document.getElementById("worker");
-  const poolInput = document.getElementById("pool");
+  const workerInput = document.getElementById("workerName");
+  const poolInput = document.getElementById("poolSelect");
   const threadInput = document.getElementById("threads");
   const languageSelect = document.getElementById("language");
 
@@ -200,6 +200,8 @@ window.onload = () => {
     hashrateHistory = [];
     workerHashrates.length = 0; // reset hashrate tracking
     startTime = Date.now();
+    if (interval) clearInterval(interval);
+    interval = setInterval(updateStats, 1000); // Update every second
     startBtn.disabled = true;
     stopBtn.disabled = false;
     updateStats();
@@ -226,6 +228,10 @@ window.onload = () => {
     mining = false;
     clearInterval(interval);
     clearInterval(telemetryInterval);
+    if (interval) {
+      clearInterval(interval);
+      interval = null;
+    }
     startBtn.disabled = false;
     stopBtn.disabled = true;
     appendToLog("🛑 Mining stopped.");
@@ -300,18 +306,15 @@ window.onload = () => {
   }
 
   function updateStats() {
-    const elapsed = Math.floor((Date.now() - startTime) / 1000);
-    document.getElementById("elapsed").textContent = `${elapsed}s`;
+    const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
+    document.getElementById("elapsed").textContent = `${elapsedSec}s`;
+
+    const totalHashrate = workerHashrates.reduce((a, b) => a + b, 0);
+    document.getElementById("hashrate").textContent = `${totalHashrate.toFixed(2)} H/s`;
+
     document.getElementById("accepted").textContent = accepted;
     document.getElementById("rejected").textContent = rejected;
-    document.getElementById("donationCount").textContent = donationSent;
-
-    // Sum up all worker hashrates for total
-    const hashrate = workerHashrates.reduce((a, b) => a + b || 0, 0);
-    document.getElementById("hashrate").textContent = `${hashrate.toFixed(2)} H/s`;
-
-    hashrateHistory.push(hashrate);
-    if (hashrateHistory.length > 100) hashrateHistory.shift();
+    document.getElementById("donation").textContent = donationSent;
   }
 
   function logShare(msg) {

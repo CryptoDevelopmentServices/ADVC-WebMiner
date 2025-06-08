@@ -17,13 +17,13 @@
     </div>
 
     <div class="form-group">
-      <label for="worker">Worker Name:</label>
-      <input type="text" id="worker" placeholder="e.g. rig1" />
+      <label for="workerName">Worker Name:</label>
+      <input type="text" id="workerName" placeholder="e.g. rig1" />
     </div>
 
     <div class="form-group">
-      <label for="pool">Mining Pool:</label>
-      <select id="pool">
+      <label for="poolSelect">Mining Pool:</label>
+      <select id="poolSelect">
         <option value="stratum.novagrid.online:3130" data-url="wss://stratum.novagrid.online:3130">NovaGrid</option>
         <option value="eu.coin-miners.info:7650" data-url="wss://eu.coin-miners.info:7650">Coin-Miners EU</option>
         <option value="zergpool.com:6240" data-url="wss://zergpool.com:6240">Zergpool</option>
@@ -41,7 +41,6 @@
         <option value="en">English</option>
         <option value="es">Español</option>
         <option value="fr">Français</option>
-        <!-- Add more languages as needed -->
       </select>
     </div>
 
@@ -57,8 +56,8 @@
       <p>⏱ Time: <span id="elapsed">0s</span></p>
       <p>⚡ Hashrate: <span id="hashrate">0 H/s</span></p>
       <p>📤 Shares: ✅ <span id="accepted">0</span> ❌ <span id="rejected">0</span></p>
-      <p title="1 share per 100 goes to the dev wallet.">💾 Donation Shares Sent: <span id="donationCount">0</span></p>
-      <p>📶 Pool Latency: <span id="latency">0ms</span></p>
+      <p title="1 share per 100 goes to the dev wallet.">💾 Donation Shares Sent: <span id="donation">0</span></p>
+      <p>📶 Pool Latency: <span id="latency">N/A</span></p>
       <p>🎯 Difficulty: <span id="difficulty">N/A</span></p>
     </div>
 
@@ -75,7 +74,6 @@
     </p>
   </div>
 
-  <!-- Load your main.js as ES module -->
   <script src="assets/js/main.js" type="module"></script>
 </body>
 </html>

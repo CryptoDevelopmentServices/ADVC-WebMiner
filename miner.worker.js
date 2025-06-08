@@ -49,8 +49,6 @@ function yespowerHash(blob) {
 
 // Compare if hash is less than target (both Uint8Array), little endian (Bitcoin style)
 function lessThanTarget(hash, target) {
-  // Bitcoin uses big-endian target, but in stratum mining usually targets are little endian
-  // Here we assume target is given in little endian
   for (let i = 31; i >= 0; i--) {
     if (hash[i] < target[i]) return true;
     if (hash[i] > target[i]) return false;
@@ -62,8 +60,10 @@ function lessThanTarget(hash, target) {
 // Note: nonce is bytes 39..42 inclusive (4 bytes) in blob (0-based index)
 // Return first valid nonce and hash that meet target
 function mineJob(blob, target) {
-  const blobCopy = new Uint8Array(blob); // copy to modify nonce
+  const blobCopy = new Uint8Array(blob);
   for (let nonce = 0; nonce <= 0xFFFFFFFF; nonce++) {
+    if (!mining) return null; // Interrupt mining if flag cleared
+
     // Write nonce into blob bytes 39..42 (4 bytes little endian)
     blobCopy[39] = nonce & 0xff;
     blobCopy[40] = (nonce >> 8) & 0xff;
@@ -77,7 +77,7 @@ function mineJob(blob, target) {
       return { nonce, hash };
     }
   }
-  return null; // no valid nonce found (shouldn't happen often)
+  return null; // no valid nonce found
 }
 
 onmessage = async (e) => {
@@ -91,7 +91,6 @@ onmessage = async (e) => {
     startTime = Date.now();
     postMessage({ type: 'ready', workerIndex });
 
-    // Start periodic hashrate reporting every 2 seconds
     if (hashrateInterval) clearInterval(hashrateInterval);
     hashrateInterval = setInterval(() => {
       const elapsedSeconds = (Date.now() - startTime) / 1000;
@@ -104,28 +103,22 @@ onmessage = async (e) => {
     socket = new WebSocket(proxyURL);
 
     socket.onopen = () => {
-      postMessage({ type: 'log', message: `[⛏] Worker #${workerIndex} connected to pool proxy.` , workerIndex});
+      postMessage({ type: 'log', message: `[⛏] Worker #${workerIndex} connected to pool proxy.`, workerIndex });
     };
 
     socket.onmessage = (event) => {
       const data = event.data;
-
-      // Split incoming messages by newlines
       const messages = data.split(/\r?\n/);
-
       for (const msgStr of messages) {
         if (!msgStr.trim()) continue;
-
         try {
           const msg = JSON.parse(msgStr);
           if (msg.type === 'log') {
             postMessage({ type: 'log', message: msg.message, workerIndex });
             continue;
           }
-          // Pass JSON messages as stratum if no special handling
           postMessage({ type: 'stratum', data: msgStr, workerIndex });
         } catch {
-          // Not JSON, treat as raw stratum data
           postMessage({ type: 'stratum', data: msgStr, workerIndex });
         }
       }
@@ -154,15 +147,17 @@ onmessage = async (e) => {
       postMessage({ type: 'log', message: `[!] Invalid job data.`, workerIndex });
       return;
     }
+    mining = false; // stop any previous mining immediately
+    totalHashes = 0; // reset hashrate count for new job
+    startTime = Date.now(); // reset timer for new job
     mining = true;
 
-    // Parse hex strings if needed (some code passes hex string, some pass Uint8Array)
+    // Parse hex strings if needed
     let blobBytes = blob instanceof Uint8Array ? blob : hexToBytes(blob);
     let targetBytes = target instanceof Uint8Array ? target : hexToBytes(target);
 
     postMessage({ type: 'log', message: `[⛏] Worker #${workerIndex} started mining job.`, workerIndex });
 
-    // Mine job - find nonce and hash
     const result = mineJob(blobBytes, targetBytes);
     mining = false;
 
@@ -170,6 +165,7 @@ onmessage = async (e) => {
       postMessage({
         type: 'share',
         nonce: result.nonce,
+        nonceHex: ('00000000' + result.nonce.toString(16)).slice(-8),
         result: bytesToHex(result.hash),
         workerIndex
       });

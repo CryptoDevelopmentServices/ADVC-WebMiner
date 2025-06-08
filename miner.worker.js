@@ -62,7 +62,10 @@ function lessThanTarget(hash, target) {
 function mineJob(blob, target) {
   const blobCopy = new Uint8Array(blob);
   for (let nonce = 0; nonce <= 0xFFFFFFFF; nonce++) {
-    if (!mining) return null; // Interrupt mining if flag cleared
+    if (!mining) {
+      postMessage({ type: 'log', message: `[⏹] Mining stopped by flag.`, workerIndex });
+      return null; // Interrupt mining if flag cleared
+    }
 
     // Write nonce into blob bytes 39..42 (4 bytes little endian)
     blobCopy[39] = nonce & 0xff;
@@ -76,6 +79,11 @@ function mineJob(blob, target) {
     if (lessThanTarget(hash, target)) {
       return { nonce, hash };
     }
+
+    // Optionally, post intermediate progress every million hashes for debugging
+    if (nonce % 1_000_000 === 0) {
+      postMessage({ type: 'log', message: `[⛏] Mining progress: nonce ${nonce}`, workerIndex });
+    }
   }
   return null; // no valid nonce found
 }
@@ -84,6 +92,7 @@ onmessage = async (e) => {
   const { type, input, job, params, proxyURL, workerIndex: idx, blob, target } = e.data;
 
   if (type === 'init') {
+    postMessage({ type: 'log', message: `[⏳] Worker #${idx} initializing WASM module...`, workerIndex: idx });
     Module = await YespowerADVC();
     initialized = true;
     workerIndex = idx || 0;
@@ -97,13 +106,20 @@ onmessage = async (e) => {
       const hashrate = elapsedSeconds > 0 ? totalHashes / elapsedSeconds : 0;
       postMessage({ type: 'hashrate', value: hashrate, workerIndex });
     }, 2000);
+
+    postMessage({ type: 'log', message: `[✅] Worker #${workerIndex} WASM module initialized.`, workerIndex });
   }
 
-  if (type === 'connect' && proxyURL) {
+  else if (type === 'connect' && proxyURL) {
+    if (socket) {
+      socket.close();
+      socket = null;
+    }
+
     socket = new WebSocket(proxyURL);
 
     socket.onopen = () => {
-      postMessage({ type: 'log', message: `[⛏] Worker #${workerIndex} connected to pool proxy.`, workerIndex });
+      postMessage({ type: 'log', message: `[⛏] Worker #${workerIndex} connected to pool proxy: ${proxyURL}`, workerIndex });
     };
 
     socket.onmessage = (event) => {
@@ -133,20 +149,27 @@ onmessage = async (e) => {
     };
   }
 
-  if (type === 'disconnect') {
+  else if (type === 'disconnect') {
     if (socket) {
       socket.close();
       socket = null;
     }
     mining = false;
     if (hashrateInterval) clearInterval(hashrateInterval);
+    postMessage({ type: 'log', message: `[⏹] Worker #${workerIndex} disconnected and mining stopped.`, workerIndex });
   }
 
-  if (type === 'job' && initialized) {
-    if (!blob || !target) {
-      postMessage({ type: 'log', message: `[!] Invalid job data.`, workerIndex });
+  else if (type === 'job') {
+    if (!initialized) {
+      postMessage({ type: 'log', message: `[!] Worker #${workerIndex} received job but WASM not initialized yet.`, workerIndex });
       return;
     }
+
+    if (!blob || !target) {
+      postMessage({ type: 'log', message: `[!] Worker #${workerIndex} invalid job data: missing blob or target.`, workerIndex });
+      return;
+    }
+
     mining = false; // stop any previous mining immediately
     totalHashes = 0; // reset hashrate count for new job
     startTime = Date.now(); // reset timer for new job

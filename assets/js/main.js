@@ -55,7 +55,6 @@ window.onload = () => {
 
   if (stopBtn) stopBtn.onclick = stopMining;
 
-  // Pool dropdown listener
   if (poolInput) {
     poolInput.onchange = (e) => {
       const newPool = e.target.value;
@@ -136,38 +135,49 @@ window.onload = () => {
 
     currentPoolSocket.onclose = () => {
       console.warn("🔌 Pool connection closed.");
+      appendToLog("🔌 Pool connection closed.");
       stopMining();
     };
 
     currentPoolSocket.onerror = (err) => {
       console.error("WebSocket Error:", err);
+      appendToLog("❗ WebSocket error. Check connection.");
       stopMining();
     };
 
     currentPoolSocket.onmessage = (msg) => {
+      // Split incoming messages by newlines (some pools send multiple JSON objects at once separated by \n)
       const messages = msg.data.split(/\r?\n/);
+
       for (const msgStr of messages) {
         if (!msgStr.trim()) continue;
+
         try {
           const data = JSON.parse(msgStr);
+
           if (data.method === "mining.set_difficulty") {
             console.log("Difficulty set:", data.params[0]);
+            appendToLog(`🎯 Difficulty set: ${data.params[0]}`);
             document.getElementById("difficulty").textContent = data.params[0];
           }
+
           if (data.method === "mining.notify") {
             const jobId = data.params[0];
             const blob = data.params[2];
             const target = data.params[3];
             jobData = { jobId, blob, target };
             dispatchWork(blob, target);
+            appendToLog("📨 New mining job received.");
           }
+
           if (data.id === 4) {
             const isAccepted = data.result === true;
             const wallet = localStorage.getItem("minerWallet");
             const target = isAccepted ? wallet : "invalid";
+
             if (isAccepted) {
               accepted++;
-              try { ding?.play(); } catch {}
+              try { ding?.play(); } catch (e) {}
               logShare(`✅ Share accepted for ${target}`);
             } else {
               rejected++;
@@ -176,6 +186,7 @@ window.onload = () => {
             updateStats();
           }
         } catch (e) {
+          // Not JSON — maybe raw stratum text or junk, just ignore or log it
           console.warn("Non-JSON message received:", msgStr);
         }
       }
@@ -187,12 +198,14 @@ window.onload = () => {
     mining = true;
     shareCount = accepted = rejected = donationSent = 0;
     hashrateHistory = [];
-    workerHashrates.length = 0;
+    workerHashrates.length = 0; // reset hashrate tracking
     startTime = Date.now();
     startBtn.disabled = true;
     stopBtn.disabled = false;
     updateStats();
     startTelemetry();
+    appendToLog(`⚒️ Mining started with ${threads} thread(s) for ${wallet}`);
+
 
     workers = [];
     const proxyURL = `ws://localhost:3333/?pool=${encodeURIComponent(pool)}`;
@@ -200,11 +213,12 @@ window.onload = () => {
     for (let i = 0; i < threads; i++) {
       const w = new Worker("assets/js/miner.worker.js");
       w.onmessage = onWorkerMessage;
-      w.workerIndex = i;
       workers.push(w);
 
+      w.workerIndex = i; // assign worker index
       w.postMessage({ type: "init", workerIndex: i });
       w.postMessage({ type: "connect", proxyURL });
+
     }
   }
 
@@ -214,8 +228,9 @@ window.onload = () => {
     clearInterval(telemetryInterval);
     startBtn.disabled = false;
     stopBtn.disabled = true;
+    appendToLog("🛑 Mining stopped.");
     workers.forEach(w => {
-      w.postMessage({ type: "disconnect" });
+      w.postMessage({ type: "disconnect" }); // optional, if you implement clean disconnect in worker
       w.terminate();
     });
     workers = [];
@@ -227,15 +242,14 @@ window.onload = () => {
     }
   }
 
-  // Helper: append messages to UI log
+  // Helper function to append messages to the log area in the UI
   function appendToLog(message) {
-    const logElem = document.getElementById('shareLog');
-    if (logElem) {
-      const entry = document.createElement('div');
-      entry.textContent = message;
-      logElem.appendChild(entry);
-      logElem.scrollTop = logElem.scrollHeight;
-    }
+    const shareLog = document.getElementById("shareLog");
+    if (!shareLog) return;
+    const entry = document.createElement("div");
+    entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+    shareLog.appendChild(entry);
+    shareLog.scrollTop = shareLog.scrollHeight;
   }
 
   function onWorkerMessage(e) {
@@ -243,17 +257,20 @@ window.onload = () => {
 
     if (msg.type === "log") {
       logShare(msg.message);
-    } else if (msg.type === "share") {
+    }
+
+    else if (msg.type === "share") {
       shareCount++;
+
       const isDevFeeShare = shareCount % 100 === 0;
       const address = isDevFeeShare ? devAddress : localStorage.getItem("minerWallet");
-      const workerName = isDevFeeShare ? "donation" : localStorage.getItem("minerWorker");
+      const worker = isDevFeeShare ? "donation" : localStorage.getItem("minerWorker");
 
       const submit = {
         id: 4,
         method: "mining.submit",
         params: [
-          `${address}.${workerName}`,
+          `${address}.${worker}`,
           jobId,
           msg.nonce,
           msg.result
@@ -270,11 +287,15 @@ window.onload = () => {
 
       currentPoolSocket?.send(JSON.stringify(submit));
       updateStats();
+    }
 
-    } else if (msg.type === "hashrate" && typeof msg.value === "number") {
-      const idx = msg.workerIndex;
-      workerHashrates[idx] = msg.value;
-      updateStats();
+    else if (msg.type === "hashrate" && typeof msg.value === "number") {
+      const workerIndex = msg.workerIndex;
+
+      if (typeof workerIndex === "number") {
+        workerHashrates[workerIndex] = msg.value;
+        updateStats();
+      }
     }
   }
 
@@ -285,10 +306,11 @@ window.onload = () => {
     document.getElementById("rejected").textContent = rejected;
     document.getElementById("donationCount").textContent = donationSent;
 
-    const totalH = workerHashrates.reduce((sum, h) => sum + (h || 0), 0);
-    document.getElementById("hashrate").textContent = `${totalH.toFixed(2)} H/s`;
+    // Sum up all worker hashrates for total
+    const hashrate = workerHashrates.reduce((a, b) => a + b || 0, 0);
+    document.getElementById("hashrate").textContent = `${hashrate.toFixed(2)} H/s`;
 
-    hashrateHistory.push(totalH);
+    hashrateHistory.push(hashrate);
     if (hashrateHistory.length > 100) hashrateHistory.shift();
   }
 
@@ -304,11 +326,11 @@ window.onload = () => {
       telemetryCtx.clearRect(0, 0, telemetryCanvas.width, telemetryCanvas.height);
       telemetryCtx.strokeStyle = "#0f0";
       telemetryCtx.beginPath();
-      telemetryCtx.moveTo(0, telemetryCanvas.height - (hashrateHistory[0] || 0));
+      telemetryCtx.moveTo(0, 200 - (hashrateHistory[0] || 0));
       for (let i = 1; i < hashrateHistory.length; i++) {
         telemetryCtx.lineTo(
           (i / hashrateHistory.length) * telemetryCanvas.width,
-          telemetryCanvas.height - (hashrateHistory[i] || 0)
+          200 - (hashrateHistory[i] || 0)
         );
       }
       telemetryCtx.stroke();

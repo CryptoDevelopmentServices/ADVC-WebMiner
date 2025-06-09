@@ -112,7 +112,7 @@ onmessage = async (e) => {
     hashrateInterval = setInterval(() => {
       const elapsedSeconds = (Date.now() - startTime) / 1000;
       const hashrate = elapsedSeconds > 0 ? totalHashes / elapsedSeconds : 0;
-      postMessage({ type: 'hashrate', value: hashrate, workerIndex });
+      postMessage({ type: 'hashrate', hps: hashrate });
     }, 2000);
 
     postMessage({ type: 'log', message: `[✅] Worker #${workerIndex} WASM module initialized.`, workerIndex });
@@ -174,8 +174,8 @@ onmessage = async (e) => {
       return;
     }
 
-    if (!blob || !target) {
-      postMessage({ type: 'log', message: `[!] Worker #${workerIndex} invalid job data: missing blob or target.`, workerIndex });
+    if (!blob || !target || !job || !job.job_id) {
+      postMessage({ type: 'log', message: `[!] Worker #${workerIndex} invalid job data.`, workerIndex });
       return;
     }
 
@@ -201,14 +201,13 @@ onmessage = async (e) => {
     if (result) {
       postMessage({
         type: 'share',
-        nonce: result.nonce,
-        nonceHex: result.nonce.toString(16).padStart(8, '0'),
-        result: bytesToHex(result.hash),
+        result: {
+          nonce: result.nonce.toString(16).padStart(8, '0'),
+          result: bytesToHex(result.hash),
+          job_id: job.job_id
+        },
         workerIndex
       });
-      postMessage({ type: 'log', message: `[✓] Worker #${workerIndex} found valid share! Nonce: ${result.nonce}`, workerIndex });
-    } else {
-      postMessage({ type: 'log', message: `[✘] Worker #${workerIndex} failed to find valid nonce.`, workerIndex });
     }
   }
 };

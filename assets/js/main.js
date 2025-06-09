@@ -146,8 +146,31 @@ window.onload = () => {
     };
 
     currentPoolSocket.onmessage = (msg) => {
-      // Split incoming messages by newlines (some pools send multiple JSON objects at once separated by \n)
-      const messages = msg.data.split(/\r?\n/);
+      let raw;
+
+      // Decode msg.data into a string
+      if (typeof msg.data === 'string') {
+        raw = msg.data;
+      } else if (msg.data instanceof ArrayBuffer) {
+        raw = new TextDecoder().decode(msg.data);
+      } else if (msg.data instanceof Blob) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          processStratumMessages(reader.result);
+        };
+        reader.readAsText(msg.data);
+        return;
+      } else {
+        console.warn("Unknown message type:", msg.data);
+        return;
+      }
+
+      processStratumMessages(raw);
+    };
+
+    // Helper to process one or more newline-delimited JSON messages
+    function processStratumMessages(raw) {
+      const messages = raw.split(/\r?\n/);
 
       for (const msgStr of messages) {
         if (!msgStr.trim()) continue;
@@ -162,12 +185,14 @@ window.onload = () => {
           }
 
           if (data.method === "mining.notify") {
+            const start = Date.now();
             const jobId = data.params[0];
             const blob = data.params[2];
             const target = data.params[3];
             jobData = { jobId, blob, target };
             dispatchWork(blob, target);
             appendToLog("📨 New mining job received.");
+            updateLatency(start);
           }
 
           if (data.id === 4) {
@@ -179,14 +204,15 @@ window.onload = () => {
               accepted++;
               try { ding?.play(); } catch (e) {}
               logShare(`✅ Share accepted for ${target}`);
+              appendToLog(`✅ Share accepted for ${target}`);
             } else {
               rejected++;
               logShare(`❌ Share rejected`);
+              appendToLog("❌ Share rejected");
             }
             updateStats();
           }
         } catch (e) {
-          // Not JSON — maybe raw stratum text or junk, just ignore or log it
           console.warn("Non-JSON message received:", msgStr);
         }
       }
@@ -226,20 +252,29 @@ window.onload = () => {
 
   function stopMining() {
     mining = false;
-    clearInterval(interval);
-    clearInterval(telemetryInterval);
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+
+    if (currentPoolSocket) {
+      currentPoolSocket.close();
+      currentPoolSocket = null;
+    }
+
     if (interval) {
       clearInterval(interval);
       interval = null;
     }
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-    appendToLog("🛑 Mining stopped.");
-    workers.forEach(w => {
-      w.postMessage({ type: "disconnect" }); // optional, if you implement clean disconnect in worker
-      w.terminate();
-    });
+
+    if (telemetryInterval) {
+      clearInterval(telemetryInterval);
+      telemetryInterval = null;
+    }
+
+    // Terminate all workers
+    workers.forEach(w => w.terminate());
     workers = [];
+
+    appendToLog("⛔ Mining stopped.");
   }
 
   function dispatchWork(blob, target) {
@@ -306,15 +341,22 @@ window.onload = () => {
   }
 
   function updateStats() {
-    const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
-    document.getElementById("elapsed").textContent = `${elapsedSec}s`;
-
-    const totalHashrate = workerHashrates.reduce((a, b) => a + b, 0);
-    document.getElementById("hashrate").textContent = `${totalHashrate.toFixed(2)} H/s`;
-
+    const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+    const minutes = String(Math.floor(elapsedSeconds / 60)).padStart(2, '0');
+    const seconds = String(elapsedSeconds % 60).padStart(2, '0');
+    document.getElementById("elapsedTime").textContent = `${minutes}:${seconds}`;
     document.getElementById("accepted").textContent = accepted;
     document.getElementById("rejected").textContent = rejected;
-    document.getElementById("donation").textContent = donationSent;
+    document.getElementById("donationSent").textContent = donationSent;
+
+    // Compute total hashrate
+    const totalHashrate = workerHashrates.reduce((a, b) => a + b, 0);
+    document.getElementById("hashrate").textContent = `${totalHashrate.toFixed(2)} H/s`;
+  }
+
+  function updateLatency(start) {
+    const latency = Date.now() - start;
+    document.getElementById("latency").textContent = `${latency} ms`;
   }
 
   function logShare(msg) {

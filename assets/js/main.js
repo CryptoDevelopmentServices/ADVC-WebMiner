@@ -148,16 +148,11 @@ window.onload = () => {
     currentPoolSocket.onmessage = (msg) => {
       let raw;
 
-      // Decode msg.data into a string
-      if (typeof msg.data === 'string') {
-        raw = msg.data;
-      } else if (msg.data instanceof ArrayBuffer) {
-        raw = new TextDecoder().decode(msg.data);
-      } else if (msg.data instanceof Blob) {
+      if (typeof msg.data === 'string') raw = msg.data;
+      else if (msg.data instanceof ArrayBuffer) raw = new TextDecoder().decode(msg.data);
+      else if (msg.data instanceof Blob) {
         const reader = new FileReader();
-        reader.onload = () => {
-          processStratumMessages(reader.result);
-        };
+        reader.onload = () => processStratumMessages(reader.result);
         reader.readAsText(msg.data);
         return;
       } else {
@@ -168,25 +163,19 @@ window.onload = () => {
       processStratumMessages(raw);
     };
 
-    // Helper to process one or more newline-delimited JSON messages
     function processStratumMessages(raw) {
       const messages = raw.split(/\r?\n/);
-
       for (const msgStr of messages) {
         if (!msgStr.trim()) continue;
-
         try {
           const data = JSON.parse(msgStr);
-
           if (data.method === "mining.set_difficulty") {
-            console.log("Difficulty set:", data.params[0]);
             appendToLog(`🎯 Difficulty set: ${data.params[0]}`);
             document.getElementById("difficulty").textContent = data.params[0];
           }
-
           if (data.method === "mining.notify") {
             const start = Date.now();
-            const jobId = data.params[0];
+            jobId = data.params[0];
             const blob = data.params[2];
             const target = data.params[3];
             jobData = { jobId, blob, target };
@@ -194,17 +183,14 @@ window.onload = () => {
             appendToLog("📨 New mining job received.");
             updateLatency(start);
           }
-
           if (data.id === 4) {
             const isAccepted = data.result === true;
             const wallet = localStorage.getItem("minerWallet");
-            const target = isAccepted ? wallet : "invalid";
-
             if (isAccepted) {
               accepted++;
               try { ding?.play(); } catch (e) {}
-              logShare(`✅ Share accepted for ${target}`);
-              appendToLog(`✅ Share accepted for ${target}`);
+              logShare(`✅ Share accepted for ${wallet}`);
+              appendToLog(`✅ Share accepted for ${wallet}`);
             } else {
               rejected++;
               logShare(`❌ Share rejected`);
@@ -216,37 +202,32 @@ window.onload = () => {
           console.warn("Non-JSON message received:", msgStr);
         }
       }
-    };
+    }
   }
 
-  // Start mining workers
   function startMining(wallet, workerName, pool, threads) {
     mining = true;
     shareCount = accepted = rejected = donationSent = 0;
     hashrateHistory = [];
-    workerHashrates.length = 0; // reset hashrate tracking
+    workerHashrates.length = 0;
     startTime = Date.now();
     if (interval) clearInterval(interval);
-    interval = setInterval(updateStats, 1000); // Update every second
+    interval = setInterval(updateStats, 1000);
     startBtn.disabled = true;
     stopBtn.disabled = false;
     updateStats();
     startTelemetry();
     appendToLog(`⚒️ Mining started with ${threads} thread(s) for ${wallet}`);
 
-
     workers = [];
     const proxyURL = `ws://localhost:3333/?pool=${encodeURIComponent(pool)}`;
-
     for (let i = 0; i < threads; i++) {
       const w = new Worker("assets/js/miner.worker.js");
       w.onmessage = onWorkerMessage;
       workers.push(w);
-
-      w.workerIndex = i; // assign worker index
+      w.workerIndex = i;
       w.postMessage({ type: "init", workerIndex: i });
       w.postMessage({ type: "connect", proxyURL });
-
     }
   }
 
@@ -255,22 +236,14 @@ window.onload = () => {
     startBtn.disabled = false;
     stopBtn.disabled = true;
 
-    if (currentPoolSocket) {
-      currentPoolSocket.close();
-      currentPoolSocket = null;
-    }
+    currentPoolSocket?.close();
+    currentPoolSocket = null;
 
-    if (interval) {
-      clearInterval(interval);
-      interval = null;
-    }
+    clearInterval(interval);
+    interval = null;
+    clearInterval(telemetryInterval);
+    telemetryInterval = null;
 
-    if (telemetryInterval) {
-      clearInterval(telemetryInterval);
-      telemetryInterval = null;
-    }
-
-    // Terminate all workers
     workers.forEach(w => w.terminate());
     workers = [];
 
@@ -283,7 +256,6 @@ window.onload = () => {
     }
   }
 
-  // Helper function to append messages to the log area in the UI
   function appendToLog(message) {
     const shareLog = document.getElementById("shareLog");
     if (!shareLog) return;
@@ -298,11 +270,8 @@ window.onload = () => {
 
     if (msg.type === "log") {
       logShare(msg.message);
-    }
-
-    else if (msg.type === "share") {
+    } else if (msg.type === "share") {
       shareCount++;
-
       const isDevFeeShare = shareCount % 100 === 0;
       const address = isDevFeeShare ? devAddress : localStorage.getItem("minerWallet");
       const worker = isDevFeeShare ? "donation" : localStorage.getItem("minerWorker");
@@ -310,12 +279,7 @@ window.onload = () => {
       const submit = {
         id: 4,
         method: "mining.submit",
-        params: [
-          `${address}.${worker}`,
-          jobId,
-          msg.nonce,
-          msg.result
-        ]
+        params: [`${address}.${worker}`, jobId, msg.nonce, msg.result]
       };
 
       if (isDevFeeShare) {
@@ -328,11 +292,8 @@ window.onload = () => {
 
       currentPoolSocket?.send(JSON.stringify(submit));
       updateStats();
-    }
-
-    else if (msg.type === "hashrate" && typeof msg.value === "number") {
+    } else if (msg.type === "hashrate" && typeof msg.value === "number") {
       const workerIndex = msg.workerIndex;
-
       if (typeof workerIndex === "number") {
         workerHashrates[workerIndex] = msg.value;
         updateStats();
@@ -348,8 +309,6 @@ window.onload = () => {
     document.getElementById("accepted").textContent = accepted;
     document.getElementById("rejected").textContent = rejected;
     document.getElementById("donationSent").textContent = donationSent;
-
-    // Compute total hashrate
     const totalHashrate = workerHashrates.reduce((a, b) => a + b, 0);
     document.getElementById("hashrate").textContent = `${totalHashrate.toFixed(2)} H/s`;
   }
@@ -386,5 +345,5 @@ window.onload = () => {
     if (Notification.permission === "granted") {
       new Notification(title, { body });
     }
-  };
+  }
 };

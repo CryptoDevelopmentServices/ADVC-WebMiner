@@ -76,7 +76,21 @@ async function mineJob(blob, target) {
     const hash = yespowerHash(blobCopy);
     totalHashes++;
 
+    const now = Date.now();
+    if (now - startTime >= 1000) {
+      const hps = totalHashes / ((now - startTime) / 1000);
+      postMessage({ type: 'hashrate', hps });
+      startTime = now;
+      totalHashes = 0;
+    }
+
     if (lessThanTarget(hash, target)) {
+      postMessage({
+        type: 'share',
+        nonce,
+        hash: bytesToHex(hash),
+        workerIndex
+      });
       return { nonce, hash };
     }
 
@@ -203,7 +217,7 @@ onmessage = async (e) => {
         type: 'share',
         result: {
           nonce: result.nonce.toString(16).padStart(8, '0'),
-          result: bytesToHex(result.hash),
+          hash: bytesToHex(result.hash),
           job_id: job.job_id
         },
         workerIndex
